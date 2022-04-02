@@ -96,8 +96,11 @@ func main() {
 	rm := RunMetrics{}
 	m := runtime.MemStats{}
 	runtime.ReadMemStats(&m)
-	// logrus.Info(m)
-
+	logrus.SetReportCaller(true)
+	logrus.Info(m.Alloc)
+	fill(m, &rm)
+	logrus.Infof("%+v", rm)
+	// return
 	signalChanel := make(chan os.Signal, 1)
 	signal.Notify(signalChanel,
 		syscall.SIGINT,
@@ -110,10 +113,6 @@ func main() {
 			s := <-signalChanel
 			switch s {
 			// kill -SIGHUP XXXX [XXXX - идентификатор процесса для программы]
-			case syscall.SIGHUP:
-				fmt.Println("Signal hang up triggered.")
-				exit_chan <- 0
-				// kill -SIGINT XXXX или Ctrl+c  [XXXX - идентификатор процесса для программы]
 			case syscall.SIGINT:
 				fmt.Println("Signal interrupt triggered.")
 				exit_chan <- 0
@@ -134,7 +133,7 @@ func main() {
 		}
 	}()
 
-	tickerFill := time.NewTicker(2 * time.Second)
+	tickerFill := time.NewTicker(pollInterval)
 	go func() {
 		for {
 			<-tickerFill.C
@@ -143,7 +142,7 @@ func main() {
 		}
 	}()
 
-	tickerSendMetrics := time.NewTicker(10 * time.Second)
+	tickerSendMetrics := time.NewTicker(reportInterval)
 	go func() {
 		for {
 			<-tickerSendMetrics.C
@@ -167,17 +166,18 @@ func main() {
 func sendMetrics(rm RunMetrics) {
 	// в формате: http://<АДРЕС_СЕРВЕРА>/update/<ТИП_МЕТРИКИ>/<ИМЯ_МЕТРИКИ>/<ЗНАЧЕНИЕ_МЕТРИКИ>;
 	// адрес сервиса (как его писать, расскажем в следующем уроке)
-	endpoint := "http://127.0.0.1:8080/update"
 	rmMap := structs.Map(rm)
 	val := reflect.ValueOf(rm)
 	for i := 0; i < val.NumField(); i++ {
+		endpoint := "http://127.0.0.1:8080/update"
 		// fmt.Println(rm)
-		fmt.Println(val.Type().Field(i).Type.Name())
-		fmt.Println(val.Type().Field(i).Name)
-		logrus.Info(rmMap[val.Type().Field(i).Name])
-		logrus.Info(reflect.TypeOf(rmMap[val.Type().Field(i).Name]))
-		endpoint = fmt.Sprintf("%s/%s/%s/%s/", endpoint, val.Type().Field(i).Type.Name(), val.Type().Field(i).Name, rmMap[val.Type().Field(i).Name])
-
+		// logrus.Info(val.Type().Field(i).Type.Name())
+		// logrus.Info(val.Type().Field(i).Name)
+		// logrus.Info(rmMap[val.Type().Field(i).Name])
+		// logrus.Info(fmt.Sprintf("%v", rmMap[val.Type().Field(i).Name]))
+		// logrus.Info(reflect.TypeOf(rmMap[val.Type().Field(i).Name]))
+		endpoint = fmt.Sprintf("%s/%s/%s/%v", endpoint, val.Type().Field(i).Type.Name(), val.Type().Field(i).Name, rmMap[val.Type().Field(i).Name])
+		// http://<АДРЕС_СЕРВЕРА>/update/<ТИП_МЕТРИКИ>/<ИМЯ_МЕТРИКИ>/<ЗНАЧЕНИЕ_МЕТРИКИ>;
 		client := &http.Client{}
 
 		request, err := http.NewRequest(http.MethodPost, endpoint, nil)
@@ -197,6 +197,7 @@ func sendMetrics(rm RunMetrics) {
 		fmt.Println("Статус-код ", response.Status)
 		defer response.Body.Close()
 		// читаем поток из тела ответа
+
 		body, err := io.ReadAll(response.Body)
 		if err != nil {
 			fmt.Println(err)
